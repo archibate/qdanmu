@@ -35,7 +35,7 @@ if len(options) == 0:
         'height': 120,
         'refreshInterval': 6,
         'backgroundOpacity': 0.15,
-        'foregroundOpacity': 0.45,
+        'foregroundOpacity': 0.35,
         'windowLocation': 'bottomRight',
         'danmuFile': tempfile.gettempdir() + '/danmu.txt',
         'danmuFilePostfix': '[B站弹幕有屏蔽词，没显示就是叔叔屏蔽了]\n[已知屏蔽词：小彭老师、皇帝卡、Electron]',
@@ -180,7 +180,7 @@ def get_messages():
             with open('.bilibili-cookies.json', 'r') as f:
                 cookies.update(json.load(f))
     if len(cookies) == 0:
-        return ['(未登录)']
+        return ['(未登录，请先右键托盘图标，在设置中扫码登录您的B站账号)']
     if 'roomId' not in options:
         url = 'https://api.bilibili.com/x/web-interface/nav'
         req = requests.get(url, headers=headers, cookies=cookies)
@@ -216,6 +216,8 @@ class SettingsWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
+        icon = QIcon('icon.png')
+        self.setWindowIcon(icon)
         self.setWindowTitle('弹幕助手设置')
         self.resize(400, 400)
 
@@ -250,17 +252,15 @@ class SettingsWindow(QWidget):
         self.refreshInterval.valueChanged.connect(lambda value: set_option('refreshInterval', value))
         layout.addWidget(self.refreshInterval)
         layout.addWidget(QLabel('背景透明度(%)'))
-        self.backgroundOpacity = QDoubleSpinBox()
+        self.backgroundOpacity = QSpinBox()
         self.backgroundOpacity.setRange(0, 100)
-        self.backgroundOpacity.setSingleStep(0.05)
-        self.backgroundOpacity.setValue(options['backgroundOpacity'] * 100)
+        self.backgroundOpacity.setValue(int(options['backgroundOpacity'] * 100))
         self.backgroundOpacity.valueChanged.connect(lambda value: set_option('backgroundOpacity', value / 100))
         layout.addWidget(self.backgroundOpacity)
         layout.addWidget(QLabel('前景透明度(%)'))
-        self.foregroundOpacity = QDoubleSpinBox()
-        self.foregroundOpacity.setRange(0, 1)
-        self.foregroundOpacity.setSingleStep(0.05)
-        self.foregroundOpacity.setValue(options['foregroundOpacity'] * 100)
+        self.foregroundOpacity = QSpinBox()
+        self.foregroundOpacity.setRange(0, 100)
+        self.foregroundOpacity.setValue(int(options['foregroundOpacity'] * 100))
         self.foregroundOpacity.valueChanged.connect(lambda value: set_option('foregroundOpacity', value / 100))
         layout.addWidget(self.foregroundOpacity)
         layout.addWidget(QLabel('窗口位置'))
