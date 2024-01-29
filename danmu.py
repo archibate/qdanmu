@@ -4,6 +4,8 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 
+import subprocess
+import traceback
 import threading
 import tempfile
 import requests
@@ -12,6 +14,7 @@ import json
 import time
 import sys
 import os
+import re
 
 # with open(os.path.expanduser('~/.bilibili-cookies.json'), 'r') as f:
 #     cookies = {item['name']: item['value'] for item in json.load(f)}
@@ -36,10 +39,39 @@ if len(options) == 0:
         'refreshInterval': 6,
         'backgroundOpacity': 0.15,
         'foregroundOpacity': 0.35,
-        'windowLocation': 'bottomRight',
+        'fontColor': 'black',
+        'windowLocation': 'bottomLeft',
+        'showMusicName': True,
         'danmuFile': tempfile.gettempdir() + '/danmu.txt',
-        'danmuFilePostfix': '[B站弹幕有屏蔽词，没显示就是叔叔屏蔽了]\n[已知屏蔽词：小彭老师、皇帝卡、Electron]',
+        'danmuFormat': '{danmu}\n[B站弹幕有屏蔽词，没显示就是叔叔屏蔽了]\n[已知屏蔽词：小彭老师、皇帝卡、Electron]',
     }
+
+def current_music():
+    if sys.platform != 'linux':
+        return ''
+    try:
+        suffix = r'( - VLC media player|_哔哩哔哩_bilibili — Mozilla Firefox)$'
+        with subprocess.Popen(['wmctrl', '-l'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
+            stdout, _ = p.communicate()
+            stdout = stdout.decode()
+            title = ''
+            for line in stdout.splitlines():
+                # 0x02000003  3 archer 终端
+                m = re.match(r'^0x([0-9a-f]+)\s+(\d+)\s+(.*?)\s+(.*)$', line)
+                if m:
+                    title = m.group(4).strip()
+                if re.search(suffix, title):
+                    break
+            else:
+                title = ''
+        if title:
+            title = re.sub(suffix, '', title)
+        if title.endswith('.mp4'):
+            title = title[:-len('.mp4')]
+        return title
+    except:
+        traceback.print_exc()
+        return ''
 
 # def login():
 #     url = 'https://passport.bilibili.com/x/passport-login/web/qrcode/generate'
@@ -134,7 +166,7 @@ class LoginWindow(QWidget):
 
     def show_qrcode(self):
         if self.qr_url is not None:
-            print(self.qr_url)
+            # print(self.qr_url)
             import qrcode
             img = qrcode.make(self.qr_url)
             img = img.convert('RGBA')
@@ -155,13 +187,16 @@ class LoginWindow(QWidget):
         time.sleep(3)
         url = f'https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key={self.qrcode_key}'
         req = requests.get(url, headers=headers, cookies=cookies)
-        print(req.text, req.cookies.get_dict())
+        # print(req.text, req.cookies.get_dict())
         cookies.update(req.cookies.get_dict())
         data = json.loads(req.text)
         data = data['data']
         if data['code'] == 0:
             with open('.bilibili-cookies.json', 'w') as f:
                 json.dump(cookies, f)
+            del options['roomId']
+            with open('.bilibili-options.json', 'w') as f:
+                json.dump(options, f)
             self.status = '登录成功'
             self.succeeded = True
         elif data['code'] == 86038:
@@ -192,8 +227,6 @@ def get_messages():
         # title = data['title']
         # print(f'已进入直播间 {title} ({roomid})')
         set_option('roomId', roomid)
-        with open('.bilibili-options.json', 'w') as f:
-            json.dump(options, f)
     else:
         roomid = options['roomId']
     url = f'https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid={roomid}'
@@ -218,7 +251,7 @@ class SettingsWindow(QWidget):
 
         icon = QIcon('icon.png')
         self.setWindowIcon(icon)
-        self.setWindowTitle('弹幕助手设置')
+        self.setWindowTitle('弹幕助手')
         self.resize(400, 400)
 
         self.login_window = LoginWindow()
@@ -229,6 +262,9 @@ class SettingsWindow(QWidget):
         hlayout = QHBoxLayout()
         button = QPushButton('登录')
         button.clicked.connect(self.login_window.login)
+        hlayout.addWidget(button)
+        button = QPushButton('退出')
+        button.clicked.connect(QApplication.quit)
         hlayout.addWidget(button)
         button = QPushButton('重启')
         button.clicked.connect(self.restart)
@@ -262,7 +298,16 @@ class SettingsWindow(QWidget):
         self.foregroundOpacity.setRange(0, 100)
         self.foregroundOpacity.setValue(int(options['foregroundOpacity'] * 100))
         self.foregroundOpacity.valueChanged.connect(lambda value: set_option('foregroundOpacity', value / 100))
-        layout.addWidget(self.foregroundOpacity)
+        self.showMusicName = QCheckBox('显示当前音乐')
+        self.showMusicName.setChecked(options['showMusicName'])
+        self.showMusicName.stateChanged.connect(lambda value: set_option('showMusicName', value))
+        layout.addWidget(self.showMusicName)
+        layout.addWidget(QLabel('字体颜色'))
+        self.fontColor = QComboBox()
+        self.fontColor.addItems(['black', 'white'])
+        self.fontColor.setCurrentText(options['fontColor'])
+        self.fontColor.currentTextChanged.connect(lambda value: set_option('fontColor', value))
+        layout.addWidget(self.fontColor)
         layout.addWidget(QLabel('窗口位置'))
         self.windowLocation = QComboBox()
         self.windowLocation.addItems(['topLeft', 'topRight', 'bottomLeft', 'bottomRight'])
@@ -274,13 +319,13 @@ class SettingsWindow(QWidget):
         self.danmuFile.setText(options['danmuFile'])
         self.danmuFile.textChanged.connect(lambda value: set_option('danmuFile', value))
         layout.addWidget(self.danmuFile)
-        layout.addWidget(QLabel('弹幕文本输出后缀'))
-        self.danmuFilePostfix = QTextEdit()
-        self.danmuFilePostfix.setAcceptRichText(False)
-        self.danmuFilePostfix.setFixedHeight(60)
-        self.danmuFilePostfix.setText(options['danmuFilePostfix'])
-        self.danmuFilePostfix.textChanged.connect(lambda: set_option('danmuFilePostfix', self.danmuFilePostfix.toPlainText()))
-        layout.addWidget(self.danmuFilePostfix)
+        layout.addWidget(QLabel('弹幕文本输出格式'))
+        self.danmuFormat = QTextEdit()
+        self.danmuFormat.setAcceptRichText(False)
+        self.danmuFormat.setFixedHeight(60)
+        self.danmuFormat.setText(options['danmuFormat'])
+        self.danmuFormat.textChanged.connect(lambda: set_option('danmuFormat', self.danmuFormat.toPlainText()))
+        layout.addWidget(self.danmuFormat)
         self.setLayout(layout)
 
     def restart(self):
@@ -334,8 +379,12 @@ class MainWindow(QWidget):
             top_left = desktop.screenGeometry().topLeft()
             self.move(top_left)
 
-        bg, fg = options['backgroundOpacity'], options['foregroundOpacity']
-        self.setStyleSheet(f'* {{font-size: 18px; color: rgba(255, 255, 255, {fg}); background-color: rgba(0, 0, 0, {bg}); border-radius: 10px; padding: 0px;}}')
+        bga, fga = options['backgroundOpacity'], options['foregroundOpacity']
+        bgc, fgc = {
+            'black': (255, 0),
+            'white': (0, 255),
+        }[options['fontColor']]
+        self.setStyleSheet(f'* {{font-size: 18px; color: rgba({fgc}, {fgc}, {fgc}, {fga}); background-color: rgba({bgc}, {bgc}, {bgc}, {bga}); border-radius: 10px; padding: 0px;}}')
 
         self.lv = QListView()
         self.lv.setSelectionMode(QAbstractItemView.NoSelection)
@@ -376,17 +425,22 @@ class MainWindow(QWidget):
             try:
                 msgs = get_messages()
             except:
-                import traceback
                 traceback.print_exc()
                 continue
             if len(msgs) == 0:
-                msgs = ['(没有弹幕)']
+                msgs = ['(还没有弹幕，快来发一条吧)']
+            if options['showMusicName']:
+                music = current_music().strip()
+                if music:
+                    music = '当前播放：' + music
+                    msgs.append(music)
             if options['danmuFile']:
                 with open(options['danmuFile'], 'w') as f:
-                    hint = options['danmuFilePostfix']
-                    if hint:
-                        hint = '\n' + hint
-                    f.write('\n'.join(msgs) + hint)
+                    fmt = options['danmuFormat']
+                    danmu = '\n'.join(msgs)
+                    if fmt:
+                        danmu = fmt.format(danmu=danmu)
+                    f.write(danmu)
             try:
                 self.queue.put(msgs, block=False)
             except queue.Full:
@@ -413,4 +467,5 @@ def main():
 
 
 if __name__ == '__main__':
+    # print(current_music())
     sys.exit(main())
