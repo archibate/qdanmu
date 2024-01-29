@@ -209,7 +209,7 @@ def get_messages():
         set_option('roomId', roomid)
     else:
         roomid = options['roomId']
-    roomid = 3092145
+    # roomid = 3092145
     url = f'https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid={roomid}'
     req = requests.get(url, headers=headers, cookies=cookies)
     data = json.loads(req.text)

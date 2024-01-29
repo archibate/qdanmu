@@ -2,7 +2,7 @@
 
 跨平台的B站直播弹幕机，支持Linux/Windows/MacOS系统，快速查看自己直播间的B站弹幕
 
-![test.png](test.png)
+![test.jpg](test.jpg)
 
 ## 特性
 
