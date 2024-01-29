@@ -37,20 +37,23 @@ if len(options) == 0 or options.get('version', 'unknown') != current_version:
     print(f'Initializing options (version {current_version})')
     options = {
         'version': current_version,
-        'width': 420,
-        'height': 120,
+        'width': 450,
+        'height': 150,
         'refreshInterval': 6,
-        'backgroundOpacity': 0.15,
-        'foregroundOpacity': 0.35,
+        'backgroundOpacity': 0.05,
+        'foregroundOpacity': 0.65,
+        'fontFamily': 'Arial',
         'fontSize': 18,
-        'foregroundR': 0,
-        'foregroundG': 0,
-        'foregroundB': 0,
-        'backgroundR': 255,
-        'backgroundG': 255,
-        'backgroundB': 255,
+        'foregroundR': 38,
+        'foregroundG': 162,
+        'foregroundB': 105,
+        'backgroundR': 154,
+        'backgroundG': 153,
+        'backgroundB': 150,
         'windowLocation': '左下角',
-        'showMusicName': True,
+        'showMusicName': False,
+        'showUserMedal': False,
+        'bypassWindowManager': True,
         'danmuFile': tempfile.gettempdir() + '/danmu.txt',
         'danmuFormat': '{danmu}\n[B站弹幕有屏蔽词，没显示就是叔叔屏蔽了]\n[已知屏蔽词：小彭老师、皇帝卡、Electron]',
         'musicRegex': '( - VLC media player|_哔哩哔哩_bilibili — Mozilla Firefox)$',
@@ -76,6 +79,7 @@ def current_music():
                 title = ''
         if title:
             title = re.sub(suffix, '', title)
+        title = title.strip()
         if title.endswith('.mp4'):
             title = title[:-len('.mp4')]
         return title
@@ -105,6 +109,7 @@ class LoginWindow(QWidget):
         self.image.setPixmap(QPixmap('icon.png').scaled(400, 400, Qt.KeepAspectRatio))
 
         self.label = QLabel('欢迎使用小彭老师弹幕助手')
+        self.label.setAlignment(Qt.AlignHCenter)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -204,6 +209,7 @@ def get_messages():
         set_option('roomId', roomid)
     else:
         roomid = options['roomId']
+    roomid = 3092145
     url = f'https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid={roomid}'
     req = requests.get(url, headers=headers, cookies=cookies)
     data = json.loads(req.text)
@@ -212,7 +218,11 @@ def get_messages():
     for msg in msgs:
         user = msg['nickname']
         text = msg['text']
-        res.append(f'{user}: {text}')
+        medal = msg['medal']
+        if not medal or not medal[11] or not options['showUserMedal']:
+            res.append(f'{user}: {text}')
+        else:
+            res.append(f'[{medal[0]}|{medal[1]}] {user}: {text}')
     return res
 
 def set_option(key, value):
@@ -226,7 +236,7 @@ class SettingsWindow(QWidget):
         self.master = master
 
         self.setWindowIcon(self.master.icon)
-        self.setWindowTitle('弹幕助手')
+        self.setWindowTitle('弹幕助手设置')
         self.resize(400, 400)
 
         self.login_window = LoginWindow()
@@ -272,9 +282,15 @@ class SettingsWindow(QWidget):
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
+        hlayout.addWidget(QLabel('字体家族'))
+        w = QLineEdit()
+        w.setText(options['fontFamily'])
+        w.setPlaceholderText('例如：Arial')
+        w.textChanged.connect(lambda value: set_option('fontFamily', value))
+        hlayout.addWidget(w)
         hlayout.addWidget(QLabel('字体大小(px)'))
         w = QSpinBox()
-        w.setRange(1, 100)
+        w.setRange(5, 100)
         w.setValue(options['fontSize'])
         w.valueChanged.connect(lambda value: set_option('fontSize', value))
         hlayout.addWidget(w)
@@ -296,12 +312,14 @@ class SettingsWindow(QWidget):
         hlayout = QHBoxLayout()
         hlayout.addWidget(QLabel('前景颜色'))
         w = QPushButton()
-        w.setStyleSheet(f'padding: 0px; background-color: rgb({options["foregroundR"]}, {options["foregroundG"]}, {options["foregroundB"]});')
+        w.setText('...')
+        w.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options["foregroundR"]}, {options["foregroundG"]}, {options["foregroundB"]});')
         w.clicked.connect(self.color_picker(w, 'foreground'))
         hlayout.addWidget(w)
         hlayout.addWidget(QLabel('背景颜色'))
         w = QPushButton()
-        w.setStyleSheet(f'padding: 0px; background-color: rgb({options["backgroundR"]}, {options["backgroundG"]}, {options["backgroundB"]});')
+        w.setText('...')
+        w.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options["backgroundR"]}, {options["backgroundG"]}, {options["backgroundB"]});')
         w.clicked.connect(self.color_picker(w, 'background'))
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
@@ -312,14 +330,25 @@ class SettingsWindow(QWidget):
         w.setCurrentText(options['windowLocation'])
         w.currentTextChanged.connect(lambda value: set_option('windowLocation', value))
         hlayout.addWidget(w)
+        w = QCheckBox('无视窗口管理器')
+        w.setChecked(options['bypassWindowManager'])
+        w.stateChanged.connect(lambda value: set_option('bypassWindowManager', value))
+        hlayout.addWidget(w)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
-        w = QCheckBox('音乐软件正则表达式')
+        w = QCheckBox('显示用户粉丝勋章')
+        w.setChecked(options['showUserMedal'])
+        w.stateChanged.connect(lambda value: set_option('showUserMedal', value))
+        hlayout.addWidget(w)
+        layout.addLayout(hlayout)
+        hlayout = QHBoxLayout()
+        w = QCheckBox('识别音乐窗口标题')
         w.setChecked(options['showMusicName'])
         w.stateChanged.connect(lambda value: set_option('showMusicName', value))
         hlayout.addWidget(w)
         w = QLineEdit()
         w.setText(options['musicRegex'])
+        w.setPlaceholderText('例如：- QQ音乐$')
         w.textChanged.connect(lambda value: set_option('musicRegex', value))
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
@@ -336,6 +365,7 @@ class SettingsWindow(QWidget):
         w.setAcceptRichText(False)
         w.setFixedHeight(60)
         w.setText(options['danmuFormat'])
+        w.setPlaceholderText('例如：{danmu}')
         w.textChanged.connect(lambda: set_option('danmuFormat', w.toPlainText()))
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
@@ -371,7 +401,7 @@ class SettingsWindow(QWidget):
             set_option(f'{which}R', color.red())
             set_option(f'{which}G', color.green())
             set_option(f'{which}B', color.blue())
-            button.setStyleSheet(f'padding: 0px; background-color: rgb({options[f"{which}R"]}, {options[f"{which}G"]}, {options[f"{which}B"]});')
+            button.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options[f"{which}R"]}, {options[f"{which}G"]}, {options[f"{which}B"]});')
         return wrapped
 
     def restart(self):
@@ -385,10 +415,14 @@ class MainWindow(QWidget):
         self.setWindowIcon(self.icon)
         self.setWindowTitle('弹幕助手')
         # self.setWindowOpacity(0.95)
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | (0 if sys.platform != 'linux' else Qt.X11BypassWindowManagerHint))
-        self.setAttribute(Qt.WA_NoSystemBackground)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        windowFlags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        if options['bypassWindowManager']:
+            windowFlags |= Qt.BypassWindowManagerHint
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        if options['bypassWindowManager']:
+            self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setWindowFlags(windowFlags)
 
         self.settings_window = SettingsWindow(self)
         self.settings_window.show()
@@ -429,6 +463,7 @@ class MainWindow(QWidget):
         self.setStyleSheet(f"""* {{
     border-radius: 10px;
     padding: 0px;
+    font-family: {options['fontFamily']};
     font-size: {options['fontSize']}px;
     color: rgba({options['foregroundR']}, {options['foregroundG']}, {options['foregroundB']}, {options['foregroundOpacity']});
     background-color: rgba({options['backgroundR']}, {options['backgroundG']}, {options['backgroundB']}, {options['backgroundOpacity']});
