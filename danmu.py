@@ -609,7 +609,7 @@ class SettingsWindow(QWidget):
         hlayout = QHBoxLayout()
         hlayout.addWidget(QLabel('窗口位置'))
         w = QComboBox()
-        w.addItems(['左上角', '右上角', '左下角', '右下角'])
+        w.addItems(['左上角', '右上角', '左下角', '右下角', '自由拖拽'])
         w.setCurrentText(options['windowLocation'])
         w.currentTextChanged.connect(lambda value: set_option('windowLocation', value))
         hlayout.addWidget(w)
@@ -677,9 +677,7 @@ class SettingsWindow(QWidget):
         if event.key() == Qt.Key_Escape:
             self.close()
 
-    def closeEvent(self, a0):
-        event = a0
-        assert event
+    def closeEvent(self, event):
         event.ignore()
         self.hide()
         self.master.tray_icon.showMessage('弹幕助手仍在运行',
@@ -717,9 +715,11 @@ class MainWindow(QWidget):
         self.setWindowIcon(self.icon)
         self.setWindowTitle('弹幕助手')
         # self.setWindowOpacity(options['backgroundOpacity'])
-        windowFlags = Qt.FramelessWindowHint | Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint
-        if options['bypassWindowManager']:
-            windowFlags |= Qt.BypassWindowManagerHint
+        windowFlags = Qt.WindowStaysOnTopHint
+        if options['windowLocation'] != '自由拖拽':
+            windowFlags |= Qt.FramelessWindowHint | Qt.CustomizeWindowHint
+            if options['bypassWindowManager']:
+                windowFlags |= Qt.BypassWindowManagerHint
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         if options['bypassWindowManager']:
@@ -771,6 +771,9 @@ class MainWindow(QWidget):
         elif options['windowLocation'] == '左上角':
             top_left = desktop.geometry().topLeft()
             self.move(top_left)
+        else:
+            center = desktop.geometry().center()
+            self.move(center - QPoint(w // 2, h // 2))
 
         self.webView = QWebEngineView()
         self.webPage = QWebEnginePage()
@@ -801,6 +804,9 @@ class MainWindow(QWidget):
         timer.timeout.connect(self.update_messages)
         timer.start(500)
         timer.setSingleShot(False)
+
+    def closeEvent(self, event):
+        event.ignore()
 
     def eventFilter(self, target, event):
         if target == self.inputBar:
