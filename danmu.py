@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 
-from PySide2.QtGui import QIcon, QPixmap, QImage
-from PySide2.QtCore import QPoint, QThread, QTimer, Qt
-from PySide2.QtWidgets import QWidget, QLabel, QSystemTrayIcon, QPushButton, QMenu, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTextEdit, QApplication
+from PySide2.QtGui import QIcon, QPixmap, QImage, QColor
+from PySide2.QtCore import QPoint, QThread, QTimer, Qt, QEvent
+from PySide2.QtWidgets import QWidget, QLabel, QSystemTrayIcon, QPushButton, QMenu, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTextEdit, QApplication, QColorDialog
 from PySide2.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 
 import urllib.parse
 import subprocess
 import traceback
 import threading
-import tempfile
 import requests
 import hashlib
+import random
 import queue
 import json
 import html
@@ -50,12 +50,17 @@ if len(options) == 0 or options.get('version', 'undefined') != current_version:
         'version': current_version,
         'width': 450,
         'height': 180,
-        'refreshInterval': 3,
+        'refreshCountdown': 8,
+        'refreshInterval': 1,
+        'pollInterval': 4,
         'fontFamily': 'Arial',
         'fontSize': 18,
-        'foregroundR': 0,
-        'foregroundG': 209,
-        'foregroundB': 241,
+        'usernameR': 117,
+        'usernameG': 122,
+        'usernameB': 129,
+        'messageR': 162,
+        'messageG': 167,
+        'messageB': 164,
         'foregroundOpacity': 1,
         'backgroundR': 83,
         'backgroundG': 186,
@@ -67,8 +72,11 @@ if len(options) == 0 or options.get('version', 'undefined') != current_version:
         'showMsgTime': False,
         'customRoom': False,
         'customRoomId': 75287,
+        'autoStartOBS': False,
         'bypassWindowManager': True,
-        'danmuFile': tempfile.gettempdir() + '/danmu.txt',
+        'startMinimized': False,
+        # 'danmuFile': tempfile.gettempdir() + '/danmu.txt',
+        'danmuFile': '',
         'danmuFormat': '{danmu}\n[B站弹幕有屏蔽词，没显示就是叔叔屏蔽了]\n[已知屏蔽词：小彭老师、皇帝卡、Electron]',
         'musicRegex': '( - VLC media player|_哔哩哔哩_bilibili — Mozilla Firefox)$',
     }
@@ -106,7 +114,7 @@ def messages_to_html(messages: list[tuple[str, str]]) -> str:
     content += f'''<style>
 body {{
 padding: 0;
-margin: 4px;
+margin: 0px;
 }}
 div#container {{
 border-radius: 10px;
@@ -122,11 +130,11 @@ font-family: {options['fontFamily']};
 font-size: {options['fontSize']}px;
 }}
 span.username {{
-color: #757A81;
+color: rgba({options['usernameR']}, {options['usernameG']}, {options['usernameB']}, {options['foregroundOpacity']});
 }}
 span.message {{
 color: #A2A7AE;
-//color: rgba({options['foregroundR']}, {options['foregroundG']}, {options['foregroundB']}, {options['foregroundOpacity']});
+color: rgba({options['messageR']}, {options['messageG']}, {options['messageB']}, {options['foregroundOpacity']});
 }}
 </style>'''
     content += '</head><body><div id="container">'
@@ -266,12 +274,12 @@ def get_roomid():
         set_option('roomId', roomid)
     else:
         roomid = options['roomId']
-    roomid = 75287
+    # roomid = 75287
     return roomid
 
 def get_messages(roomid) -> list[tuple[str, str]]:
     if len(cookies) == 0:
-        return [('提示', '未登录，请先右键托盘图标，在设置中扫码登录您的B站账号')]
+        return [('提示', '未登录，请先点击托盘图标，在设置中扫码登录您的B站账号')]
     if roomid == 0:
         return [('提示', '直播间不存在')]
     url = f'https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid={roomid}'
@@ -307,6 +315,27 @@ def get_live_info(roomid):
     req = requests.get(url, headers=headers, cookies=cookies)
     data = json.loads(req.text)['data']
     return data
+
+def send_message(roomid, text):
+    assert roomid != 0 and len(text) != 0
+    url = 'https://api.live.bilibili.com/msg/send'
+    data = {
+        'roomid': roomid,
+        'msg': text,
+        'mode': 1,
+        'color': 0xffffff,
+        'fontsize': 25,
+        'rnd': random.randint(1, 0xffffffff),
+        'csrf': cookies['bili_jct'],
+        'csrf_token': cookies['bili_jct'],
+    }
+    data = urllib.parse.urlencode(data)
+    headers_ex = dict(headers)
+    headers_ex.update({'Content-Type': 'application/x-www-form-urlencoded'})
+    req = requests.post(url, data=data, headers=headers_ex, cookies=cookies)
+    data = json.loads(req.text)
+    if data['code'] != 0:
+        raise RuntimeError(data['message'])
 
 def set_live_title(roomid, title):
     assert roomid != 0 and len(cookies) != 0
@@ -389,7 +418,13 @@ class AreaChoiceWindow(QWidget):
         self.sub_area = QComboBox()
         self.sub_area.currentTextChanged.connect(self.set_sub_area)
         hlayout.addWidget(self.sub_area)
-        self.confirm = QPushButton('确认')
+        layout.addLayout(hlayout)
+        hlayout = QHBoxLayout()
+        self.auto_start_obs = QCheckBox('同时启动OBS')
+        self.auto_start_obs.setChecked(options['autoStartOBS'])
+        self.auto_start_obs.stateChanged.connect(lambda value: set_option('autoStartOBS', value))
+        hlayout.addWidget(self.auto_start_obs)
+        self.confirm = QPushButton('确认开播')
         self.confirm.clicked.connect(self.on_confirm)
         hlayout.addWidget(self.confirm)
         layout.addLayout(hlayout)
@@ -449,6 +484,11 @@ class AreaChoiceWindow(QWidget):
             roomid = get_roomid()
             set_live_title(roomid, self.title)
             start_live(roomid, self.area)
+            if self.auto_start_obs.checked():
+                try:
+                    subprocess.check_call(['obs', '--startstreaming'])
+                except:
+                    traceback.print_exc()
             self.master.tray_icon.showMessage('弹幕助手', '已开始直播', self.master.icon, 1000)
             self.hide()
 
@@ -505,7 +545,13 @@ class SettingsWindow(QWidget):
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
-        hlayout.addWidget(QLabel('弹幕刷新间隔(秒)'))
+        hlayout.addWidget(QLabel('弹幕轮询间隔(秒)'))
+        w = QSpinBox()
+        w.setRange(1, 60)
+        w.setValue(options['pollInterval'])
+        w.valueChanged.connect(lambda value: set_option('refreshInterval', value))
+        hlayout.addWidget(w)
+        hlayout.addWidget(QLabel('刷新间隔(秒)'))
         w = QSpinBox()
         w.setRange(1, 60)
         w.setValue(options['refreshInterval'])
@@ -541,13 +587,19 @@ class SettingsWindow(QWidget):
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
-        hlayout.addWidget(QLabel('前景颜色'))
+        hlayout.addWidget(QLabel('用户名'))
         w = QPushButton()
         w.setText('...')
-        w.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options["foregroundR"]}, {options["foregroundG"]}, {options["foregroundB"]});')
-        w.clicked.connect(self.color_picker(w, 'foreground'))
+        w.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options["usernameR"]}, {options["usernameG"]}, {options["usernameB"]});')
+        w.clicked.connect(self.color_picker(w, 'username'))
         hlayout.addWidget(w)
-        hlayout.addWidget(QLabel('背景颜色'))
+        hlayout.addWidget(QLabel('文本色'))
+        w = QPushButton()
+        w.setText('...')
+        w.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options["messageR"]}, {options["messageG"]}, {options["messageB"]});')
+        w.clicked.connect(self.color_picker(w, 'message'))
+        hlayout.addWidget(w)
+        hlayout.addWidget(QLabel('背景色'))
         w = QPushButton()
         w.setText('...')
         w.setStyleSheet(f'padding: 0px; color: grey; background-color: rgb({options["backgroundR"]}, {options["backgroundG"]}, {options["backgroundB"]});')
@@ -561,9 +613,15 @@ class SettingsWindow(QWidget):
         w.setCurrentText(options['windowLocation'])
         w.currentTextChanged.connect(lambda value: set_option('windowLocation', value))
         hlayout.addWidget(w)
-        w = QCheckBox('无视窗口管理器')
-        w.setChecked(options['bypassWindowManager'])
-        w.stateChanged.connect(lambda value: set_option('bypassWindowManager', value))
+        w = QCheckBox('启用发送弹幕功能')
+        w.setChecked(not options['bypassWindowManager'])
+        w.stateChanged.connect(lambda value: set_option('bypassWindowManager', not value))
+        hlayout.addWidget(w)
+        layout.addLayout(hlayout)
+        hlayout = QHBoxLayout()
+        w = QCheckBox('静默启动(不显示设置窗口)')
+        w.setChecked(options['startMinimized'])
+        w.stateChanged.connect(lambda value: set_option('startMinimized', value))
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
@@ -591,6 +649,7 @@ class SettingsWindow(QWidget):
         hlayout.addWidget(QLabel('弹幕输出文件(可供OBS使用)'))
         w = QLineEdit()
         w.setText(options['danmuFile'])
+        w.setPlaceholderText('留空则不输出到文件')
         w.textChanged.connect(lambda value: set_option('danmuFile', value))
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
@@ -624,7 +683,7 @@ class SettingsWindow(QWidget):
         event.ignore()
         self.hide()
         self.master.tray_icon.showMessage('弹幕助手仍在运行',
-            '程序已最小化到托盘，右键托盘图标 ->"设置/登录" 可以重新打开。',
+            '程序已最小化到托盘，点击托盘图标可以重新打开',
             self.master.icon, 2000)
 
     def color_picker(self, button, which):
@@ -642,6 +701,14 @@ class SettingsWindow(QWidget):
     def restart(self):
         os.execl(sys.executable, sys.executable, *sys.argv)
 
+    def toggle_window(self):
+        if self.isVisible():
+            self.hide()
+            return True
+        else:
+            self.show()
+            return False
+
 class MainWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -656,11 +723,12 @@ class MainWindow(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         if options['bypassWindowManager']:
-            self.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setWindowFlags(windowFlags)
 
         self.settings_window = SettingsWindow(self)
-        self.settings_window.show()
+        if not options['startMinimized']:
+            self.settings_window.show()
 
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(self.icon)
@@ -669,14 +737,23 @@ class MainWindow(QWidget):
         tray_menu = QMenu(self)
         action = tray_menu.addAction("显示/隐藏")
         action.triggered.connect(self.toggle_window)
-        action = tray_menu.addAction("设置/登录")
-        action.triggered.connect(self.settings_window.show)
+        action = tray_menu.addAction("开始直播")
+        action.triggered.connect(self.settings_window.area_choice_window.start_live)
+        action = tray_menu.addAction("停止直播")
+        action.triggered.connect(self.settings_window.area_choice_window.stop_live)
+        action = tray_menu.addAction("设置")
+        action.triggered.connect(self.settings_window.toggle_window)
         action = tray_menu.addAction("退出")
         action.triggered.connect(QApplication.quit)
 
         self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.activated.connect(self.toggle_window)
+        self.tray_icon.activated.connect(self.settings_window.toggle_window)
         self.tray_icon.show()
+
+        if options['startMinimized']:
+            self.tray_icon.showMessage('弹幕助手',
+                '程序正在后台运行，点击托盘图标可打开设置界面',
+            self.icon, 3000)
 
         w, h = options['width'], options['height']
         self.resize(w, h)
@@ -695,30 +772,25 @@ class MainWindow(QWidget):
             top_left = desktop.geometry().topLeft()
             self.move(top_left)
 
-        self.setStyleSheet(f"""* {{
-    border-radius: 10px;
-    padding: 0px;
-    font-family: {options['fontFamily']};
-    font-size: {options['fontSize']}px;
-    color: rgba({options['foregroundR']}, {options['foregroundG']}, {options['foregroundB']}, {options['foregroundOpacity']});
-    background-color: rgba({options['backgroundR']}, {options['backgroundG']}, {options['backgroundB']}, {options['backgroundOpacity']});
-}}""")
+        self.webView = QWebEngineView()
+        self.webPage = QWebEnginePage()
+        self.webPage.settings().setDefaultTextEncoding('utf-8')
+        self.webPage.settings().setFontSize(QWebEngineSettings.DefaultFontSize, options['fontSize'])
+        self.webPage.settings().setAttribute(QWebEngineSettings.ShowScrollBars, False)
+        self.webPage.setBackgroundColor(Qt.transparent)
+        self.webPage.setHtml(messages_to_html([('提示', '请稍等')]))
+        self.webView.setPage(self.webPage)
 
-        self.lv = QWebEngineView()
-        self.slm = QWebEnginePage()
-        self.slm.settings().setDefaultTextEncoding('utf-8')
-        self.slm.settings().setFontSize(QWebEngineSettings.DefaultFontSize, options['fontSize'])
-        self.slm.settings().setAttribute(QWebEngineSettings.ShowScrollBars, False)
-        self.slm.setBackgroundColor(Qt.transparent)
-        self.slm.setHtml(messages_to_html([('提示', '请稍等')]))
-        self.lv.setPage(self.slm)
-
-        # self.slm.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        # self.slm.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.inputBar = QLineEdit()
+        self.inputBar.setStyleSheet(f'border-radius: 10px; color: rgba({options["messageR"]}, {options["messageG"]}, {options["messageB"]}, {options["foregroundOpacity"]}); background-color: rgba({options["backgroundR"]}, {options["backgroundG"]}, {options["backgroundB"]}, {options["backgroundOpacity"]});')
+        self.inputBar.installEventFilter(self)
+        if options['bypassWindowManager']:
+            self.inputBar.hide()
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.lv)
+        layout.addWidget(self.webView)
+        layout.addWidget(self.inputBar)
         self.setLayout(layout)
 
         self.queue = queue.Queue(maxsize=1)
@@ -730,16 +802,44 @@ class MainWindow(QWidget):
         timer.start(500)
         timer.setSingleShot(False)
 
+    def eventFilter(self, target, event):
+        if target == self.inputBar:
+            if event.type() == QEvent.KeyPress:
+                if event.key() == Qt.Key_Return:
+                    self.on_send()
+                    return True
+        return super().eventFilter(target, event)
+
+    def on_send(self):
+        msg = self.inputBar.text().strip()
+        if msg:
+            send_message(get_roomid(), msg)
+            self.inputBar.setText('')
+
     def toggle_window(self):
         if self.isVisible():
             self.hide()
             return True
         else:
             self.show()
+            # self.activateWindow()
+            # self.inputBar.setFocus()
             return False
+
+    # def on_activate(self):
+    #     if options['bypassWindowManager']:
+    #         print('in')
+    #         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+    #
+    # def on_deactivate(self):
+    #     if options['bypassWindowManager']:
+    #         print('out')
+    #         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
     def message_worker(self):
         roomid = None
+        old_messages = []
+        countdown = options['refreshCountdown']
         while True:
             if self.queue.full():
                 time.sleep(1)
@@ -757,19 +857,28 @@ class MainWindow(QWidget):
                 music = current_music().strip()
                 if music:
                     messages.append(('当前播放', music))
-            if options['danmuFile']:
-                with open(options['danmuFile'], 'w') as f:
-                    danmuFormat = options['danmuFormat']
-                    danmuText = '\n'.join(u + ' :' + m for u, m in messages)
-                    if danmuFormat:
-                        danmuText = danmuFormat.format(danmu=danmuText)
-                    f.write(danmuText)
-            content = messages_to_html(messages)
-            try:
-                self.queue.put(content, block=False)
-            except queue.Full:
-                pass
-            time.sleep(options['refreshInterval'])
+            if messages != old_messages:
+                if options['danmuFile']:
+                    with open(options['danmuFile'], 'w') as f:
+                        danmuFormat = options['danmuFormat']
+                        danmuText = '\n'.join(u + ' :' + m for u, m in messages)
+                        if danmuFormat:
+                            danmuText = danmuFormat.format(danmu=danmuText)
+                        f.write(danmuText)
+                content = messages_to_html(messages)
+                try:
+                    self.queue.put(content, block=False)
+                except queue.Full:
+                    pass
+                old_messages = messages
+                countdown = options['refreshCountdown']
+            if countdown > 0:
+                print('refresh')
+                time.sleep(options['refreshInterval'])
+                countdown = countdown - 1
+            else:
+                print('poll')
+                time.sleep(options['pollInterval'])
 
     def update_messages(self):
         if self.isHidden():
@@ -778,8 +887,7 @@ class MainWindow(QWidget):
             content = self.queue.get(block=False)
         except queue.Empty:
             return
-        self.slm.setHtml(content)
-        # self.lv.scrollToBottom()
+        self.webPage.setHtml(content)
 
 
 def main():
@@ -790,4 +898,5 @@ def main():
 
 
 if __name__ == '__main__':
+    # send_message(get_roomid(), '测试')
     sys.exit(main())
