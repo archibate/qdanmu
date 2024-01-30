@@ -33,3 +33,8 @@ python danmu.py
 ```bash
 python live.py 75287  # 在 VLC 中打开 live.bilibili.com/75287
 ```
+
+## 提示
+
+- 设置会保存到 .bilibili-options.json
+- 登录信息会保存到 .bilibili-cookies.json
