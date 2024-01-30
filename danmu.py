@@ -4,6 +4,7 @@ from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
 
+import urllib.parse
 import subprocess
 import traceback
 import threading
@@ -17,15 +18,23 @@ import sys
 import os
 import re
 
-with open(os.path.realpath(__file__), 'rb') as f:
-    current_version = hashlib.md5(f.read()).hexdigest()[:8]
+try:
+    with open(os.path.realpath(__file__), 'rb') as f:
+        current_version = hashlib.md5(f.read()).hexdigest()[:8]
+except:
+    current_version = 'unknown'
 
 headers = {
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.5',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.116 Safari/537.36',
 }
-cookies = {}
+
+if os.path.exists('.bilibili-cookies.json'):
+    with open('.bilibili-cookies.json', 'r') as f:
+        cookies = json.load(f)
+else:
+    cookies = {}
 
 if os.path.exists('.bilibili-options.json'):
     with open('.bilibili-options.json', 'r') as f:
@@ -33,8 +42,8 @@ if os.path.exists('.bilibili-options.json'):
 else:
     options = {}
 
-if len(options) == 0 or options.get('version', 'unknown') != current_version:
-    print(f'Initializing options (version {current_version})')
+if len(options) == 0 or options.get('version', 'undefined') != current_version:
+    print(f'当前版本：{current_version}')
     options = {
         'version': current_version,
         'width': 450,
@@ -51,8 +60,12 @@ if len(options) == 0 or options.get('version', 'unknown') != current_version:
         'backgroundG': 153,
         'backgroundB': 150,
         'windowLocation': '左下角',
+        'liveArea': 0,
         'showMusicName': False,
         'showUserMedal': False,
+        'showMsgTime': False,
+        'customRoom': False,
+        'customRoomId': 75287,
         'bypassWindowManager': True,
         'danmuFile': tempfile.gettempdir() + '/danmu.txt',
         'danmuFormat': '{danmu}\n[B站弹幕有屏蔽词，没显示就是叔叔屏蔽了]\n[已知屏蔽词：小彭老师、皇帝卡、Electron]',
@@ -190,25 +203,34 @@ class LoginWindow(QWidget):
         else:
             self.status = data['message']
 
-def get_messages():
+def get_roomid():
     if len(cookies) == 0:
-        if os.path.exists('.bilibili-cookies.json'):
-            with open('.bilibili-cookies.json', 'r') as f:
-                cookies.update(json.load(f))
-    if len(cookies) == 0:
-        return ['(未登录，请先右键托盘图标，在设置中扫码登录您的B站账号)']
+        return 0
     if 'roomId' not in options:
         url = 'https://api.bilibili.com/x/web-interface/nav'
         req = requests.get(url, headers=headers, cookies=cookies)
+        data = json.loads(req.text)
+        if data['code'] != 0:
+            raise RuntimeError(data['message'])
         mid = json.loads(req.text)['data']['mid']
         url = f'https://api.live.bilibili.com/room/v1/Room/getRoomInfoOld?mid={mid}'
         req = requests.get(url, headers=headers, cookies=cookies)
-        data = json.loads(req.text)['data']
+        data = json.loads(req.text)
+        if data['code'] != 0:
+            raise RuntimeError(data['message'])
+        data = data['data']
         roomid = data['roomid']
         # print(f'已进入直播间 {data['title']} ({roomid})')
         set_option('roomId', roomid)
     else:
         roomid = options['roomId']
+    return roomid
+
+def get_messages(roomid):
+    if len(cookies) == 0:
+        return ['(未登录，请先右键托盘图标，在设置中扫码登录您的B站账号)']
+    if roomid == 0:
+        return ['(直播间不存在)']
     # roomid = 3092145
     url = f'https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid={roomid}'
     req = requests.get(url, headers=headers, cookies=cookies)
@@ -218,17 +240,175 @@ def get_messages():
     for msg in msgs:
         user = msg['nickname']
         text = msg['text']
-        medal = msg['medal']
-        if not medal or not medal[11] or not options['showUserMedal']:
-            res.append(f'{user}: {text}')
-        else:
-            res.append(f'[{medal[0]}|{medal[1]}] {user}: {text}')
+        if options['showUserMedal']:
+            medal = msg['medal']
+            if medal and medal[11]:
+                user = f'[{medal[0]}|{medal[1]}] {user}'
+        if options['showMsgTime']:
+            timeline = msg['timeline']
+            user = f'{timeline.split()[1]} {user}'
+        res.append(f'{user}: {text}')
     return res
+
+def list_live_areas():
+    url = f'https://api.live.bilibili.com/room/v1/Area/getList'
+    req = requests.get(url, headers=headers, cookies=cookies)
+    data = json.loads(req.text)
+    if data['code'] != 0:
+        raise RuntimeError(data['message'])
+    data = data['data']
+    return data
+
+def get_live_info(roomid):
+    assert roomid != 0 and len(cookies) != 0
+    url = f'https://api.live.bilibili.com/room/v1/Room/get_info?room_id={roomid}'
+    req = requests.get(url, headers=headers, cookies=cookies)
+    data = json.loads(req.text)['data']
+    return data
+
+def set_live_title(roomid, title):
+    assert roomid != 0 and len(cookies) != 0
+    url = 'https://api.live.bilibili.com/room/v1/Room/update'
+    data = {
+        'room_id': str(roomid),
+        'title': title,
+        'csrf': cookies['bili_jct'],
+        'csrf_token': cookies['bili_jct'],
+    }
+    data = urllib.parse.urlencode(data)
+    headers_ex = dict(headers)
+    headers_ex.update({'Content-Type': 'application/x-www-form-urlencoded'})
+    req = requests.post(url, data=data, headers=headers_ex, cookies=cookies)
+    data = json.loads(req.text)
+    if data['code'] != 0:
+        raise RuntimeError(data['message'])
+
+def start_live(roomid, area):
+    if area == 0:
+        return None
+    assert roomid != 0 and len(cookies) != 0
+    url = 'https://api.live.bilibili.com/room/v1/Room/startLive'
+    data = {
+        'room_id': str(roomid),
+        'area_v2': str(area),
+        'platform': 'pc',
+        'csrf': cookies['bili_jct'],
+    }
+    data = urllib.parse.urlencode(data)
+    headers_ex = dict(headers)
+    headers_ex.update({'Content-Type': 'application/x-www-form-urlencoded'})
+    req = requests.post(url, data=data, headers=headers_ex, cookies=cookies)
+    data = json.loads(req.text)
+    if data['code'] != 0:
+        raise RuntimeError(data['message'])
+    return data['rtmp']
+
+def stop_live(roomid):
+    assert roomid != 0 and len(cookies) != 0
+    url = 'https://api.live.bilibili.com/room/v1/Room/stopLive'
+    data = {
+        'room_id': str(roomid),
+        'csrf': cookies['bili_jct'],
+    }
+    data = urllib.parse.urlencode(data)
+    headers_ex = dict(headers)
+    headers_ex.update({'Content-Type': 'application/x-www-form-urlencoded'})
+    req = requests.post(url, data=data, headers=headers_ex, cookies=cookies)
+    data = json.loads(req.text)
+    if data['code'] != 0:
+        raise RuntimeError(data['message'])
 
 def set_option(key, value):
     options[key] = value
     with open('.bilibili-options.json', 'w') as f:
         json.dump(options, f)
+
+class AreaChoiceWindow(QWidget):
+    def __init__(self, master, parent=None):
+        super().__init__(parent)
+        self.master = master
+
+        self.setWindowIcon(self.master.icon)
+        self.setWindowTitle('开播分区选择')
+
+        self.areas = []
+        self.sub_areas = []
+        self.area = 0
+        self.title = ''
+
+        layout = QVBoxLayout()
+        self.live_title = QLineEdit()
+        self.live_title.textChanged.connect(self.set_live_title)
+        layout.addWidget(self.live_title)
+        hlayout = QHBoxLayout()
+        self.parent_area = QComboBox()
+        self.parent_area.currentTextChanged.connect(self.set_parent_area)
+        hlayout.addWidget(self.parent_area)
+        self.sub_area = QComboBox()
+        self.sub_area.currentTextChanged.connect(self.set_sub_area)
+        hlayout.addWidget(self.sub_area)
+        self.confirm = QPushButton('确认')
+        self.confirm.clicked.connect(self.on_confirm)
+        hlayout.addWidget(self.confirm)
+        layout.addLayout(hlayout)
+        self.setLayout(layout)
+
+    def set_live_title(self, title):
+        self.title = title
+
+    def set_sub_area(self, area):
+        for a in self.sub_areas:
+            if a['name'] == area:
+                self.area = int(a['id'])
+                break
+        else:
+            self.area = 0
+
+    def set_parent_area(self, area):
+        for a in self.areas:
+            if a['name'] == area:
+                if len(self.sub_areas) != 0:
+                    for i in reversed(range(len(self.sub_areas) + 2)):
+                        self.sub_area.removeItem(i)
+                self.sub_areas = a['list']
+                self.sub_area.addItems(['请选择'] + [a['name'] for a in self.sub_areas])
+                self.sub_area.setCurrentText('请选择')
+                self.area = 0
+                break
+        else:
+            if len(self.sub_areas) != 0:
+                for i in reversed(range(len(self.sub_areas) + 2)):
+                    self.sub_area.removeItem(i)
+            self.sub_areas = []
+            self.sub_area.addItems(['请选择'])
+            self.sub_area.setCurrentText('请选择')
+            self.area = 0
+
+    def start_live(self):
+        if self.title == '' or not self.areas:
+            info = get_live_info(get_roomid())
+            self.title = info['title']
+            self.live_title.setText(self.title)
+            self.areas = list_live_areas()
+            self.parent_area.addItems(['请选择'] + [a['name'] for a in self.areas])
+            if info['parent_area_id']:
+                self.parent_area.setCurrentText(info['parent_area_name'])
+            if info['area_id']:
+                self.sub_area.setCurrentText(info['area_name'])
+        self.show()
+
+    def stop_live(self):
+        stop_live(get_roomid())
+        self.master.tray_icon.showMessage('弹幕助手', '已停止直播', self.master.icon, 1000)
+
+    def on_confirm(self):
+        if self.area != 0:
+            print(self.title, self.area)
+            roomid = get_roomid()
+            set_live_title(roomid, self.title)
+            # start_live(roomid, self.area)
+            self.master.tray_icon.showMessage('弹幕助手', '已开始直播', self.master.icon, 1000)
+            self.hide()
 
 class SettingsWindow(QWidget):
     def __init__(self, master, parent=None):
@@ -240,6 +420,7 @@ class SettingsWindow(QWidget):
         self.resize(400, 400)
 
         self.login_window = LoginWindow()
+        self.area_choice_window = AreaChoiceWindow(self.master)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -258,6 +439,14 @@ class SettingsWindow(QWidget):
         hlayout.addWidget(button)
         button = QPushButton('隐藏弹幕窗口')
         button.clicked.connect((lambda button: lambda: button.setText('显示弹幕窗口' if self.master.toggle_window() else '隐藏弹幕窗口'))(button))
+        hlayout.addWidget(button)
+        layout.addLayout(hlayout)
+        hlayout = QHBoxLayout()
+        button = QPushButton('开始直播')
+        button.clicked.connect(self.area_choice_window.start_live)
+        hlayout.addWidget(button)
+        button = QPushButton('停止直播')
+        button.clicked.connect(self.area_choice_window.stop_live)
         hlayout.addWidget(button)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
@@ -339,6 +528,10 @@ class SettingsWindow(QWidget):
         w = QCheckBox('显示用户粉丝勋章')
         w.setChecked(options['showUserMedal'])
         w.stateChanged.connect(lambda value: set_option('showUserMedal', value))
+        hlayout.addWidget(w)
+        w = QCheckBox('显示发言时间')
+        w.setChecked(options['showMsgTime'])
+        w.stateChanged.connect(lambda value: set_option('showMsgTime', value))
         hlayout.addWidget(w)
         layout.addLayout(hlayout)
         hlayout = QHBoxLayout()
@@ -503,12 +696,15 @@ class MainWindow(QWidget):
             return False
 
     def message_worker(self):
+        roomid = None
         while True:
             if self.queue.full():
                 time.sleep(1)
                 continue
             try:
-                msgs = get_messages()
+                if roomid is None:
+                    roomid = get_roomid()
+                msgs = get_messages(roomid)
             except:
                 traceback.print_exc()
                 continue
