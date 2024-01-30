@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 
-from PyQt5.QtGui import *
-from PyQt5.QtCore import *
-from PyQt5.QtWidgets import *
+from PySide2.QtGui import QIcon, QPixmap, QImage
+from PySide2.QtCore import QPoint, QThread, QTimer, Qt
+from PySide2.QtWidgets import QWidget, QLabel, QSystemTrayIcon, QPushButton, QMenu, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTextEdit, QApplication
+from PySide2.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 
 import urllib.parse
 import subprocess
@@ -13,6 +14,7 @@ import requests
 import hashlib
 import queue
 import json
+import html
 import time
 import sys
 import os
@@ -47,20 +49,19 @@ if len(options) == 0 or options.get('version', 'undefined') != current_version:
     options = {
         'version': current_version,
         'width': 450,
-        'height': 150,
-        'refreshInterval': 6,
-        'backgroundOpacity': 0.05,
-        'foregroundOpacity': 0.65,
+        'height': 180,
+        'refreshInterval': 3,
         'fontFamily': 'Arial',
         'fontSize': 18,
-        'foregroundR': 38,
-        'foregroundG': 162,
-        'foregroundB': 105,
-        'backgroundR': 154,
-        'backgroundG': 153,
-        'backgroundB': 150,
+        'foregroundR': 0,
+        'foregroundG': 209,
+        'foregroundB': 241,
+        'foregroundOpacity': 1,
+        'backgroundR': 83,
+        'backgroundG': 186,
+        'backgroundB': 255,
+        'backgroundOpacity': 0.05,
         'windowLocation': '左下角',
-        'liveArea': 0,
         'showMusicName': False,
         'showUserMedal': False,
         'showMsgTime': False,
@@ -99,6 +100,47 @@ def current_music():
     except:
         traceback.print_exc()
         return ''
+
+def messages_to_html(messages: list[tuple[str, str]]) -> str:
+    content = '<html><head><meta charset="utf-8">'
+    content += f'''<style>
+body {{
+padding: 0;
+margin: 4px;
+}}
+div#container {{
+border-radius: 10px;
+padding: 0;
+background-color: rgba({options['backgroundR']}, {options['backgroundG']}, {options['backgroundB']}, {options['backgroundOpacity']});
+margin: 0 auto;
+height: 100%;
+width: 100%;
+overflow-y: scroll;
+}}
+span {{
+font-family: {options['fontFamily']};
+font-size: {options['fontSize']}px;
+}}
+span.username {{
+color: #757A81;
+}}
+span.message {{
+color: #A2A7AE;
+//color: rgba({options['foregroundR']}, {options['foregroundG']}, {options['foregroundB']}, {options['foregroundOpacity']});
+}}
+</style>'''
+    content += '</head><body><div id="container">'
+    for i, (username, message) in enumerate(messages):
+        content += f'<div id="m{i}" class="message">'
+        content += f'<span class="username">' + html.escape(username) + ' :</span>'
+        content += f'<span class="message">' + html.escape(message) + '</span>'
+        content += '</div>'
+    if len(messages) != 0:
+        content += f'''<script>
+document.getElementById("m{len(messages) - 1}").scrollIntoView(false)
+</script>'''
+    content += '</div></body></html>'
+    return content
 
 class MyThread(QThread):
     def __init__(self, parent, func, *args, **kwargs):
@@ -224,30 +266,30 @@ def get_roomid():
         set_option('roomId', roomid)
     else:
         roomid = options['roomId']
+    roomid = 75287
     return roomid
 
-def get_messages(roomid):
+def get_messages(roomid) -> list[tuple[str, str]]:
     if len(cookies) == 0:
-        return ['(未登录，请先右键托盘图标，在设置中扫码登录您的B站账号)']
+        return [('提示', '未登录，请先右键托盘图标，在设置中扫码登录您的B站账号')]
     if roomid == 0:
-        return ['(直播间不存在)']
-    # roomid = 3092145
+        return [('提示', '直播间不存在')]
     url = f'https://api.live.bilibili.com/xlive/web-room/v1/dM/gethistory?roomid={roomid}'
     req = requests.get(url, headers=headers, cookies=cookies)
     data = json.loads(req.text)
-    msgs = data['data']['room']
+    messages = data['data']['room']
     res = []
-    for msg in msgs:
-        user = msg['nickname']
-        text = msg['text']
+    for m in messages:
+        user = m['nickname']
+        text = m['text']
         if options['showUserMedal']:
-            medal = msg['medal']
+            medal = m['medal']
             if medal and medal[11]:
                 user = f'[{medal[0]}|{medal[1]}] {user}'
         if options['showMsgTime']:
-            timeline = msg['timeline']
+            timeline = m['timeline']
             user = f'{timeline.split()[1]} {user}'
-        res.append(f'{user}: {text}')
+        res.append((user, text))
     return res
 
 def list_live_areas():
@@ -406,7 +448,7 @@ class AreaChoiceWindow(QWidget):
             print(self.title, self.area)
             roomid = get_roomid()
             set_live_title(roomid, self.title)
-            # start_live(roomid, self.area)
+            start_live(roomid, self.area)
             self.master.tray_icon.showMessage('弹幕助手', '已开始直播', self.master.icon, 1000)
             self.hide()
 
@@ -607,8 +649,8 @@ class MainWindow(QWidget):
         self.icon = QIcon('icon.png')
         self.setWindowIcon(self.icon)
         self.setWindowTitle('弹幕助手')
-        # self.setWindowOpacity(0.95)
-        windowFlags = Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint
+        # self.setWindowOpacity(options['backgroundOpacity'])
+        windowFlags = Qt.FramelessWindowHint | Qt.CustomizeWindowHint | Qt.WindowStaysOnTopHint
         if options['bypassWindowManager']:
             windowFlags |= Qt.BypassWindowManagerHint
         self.setAttribute(Qt.WA_NoSystemBackground, True)
@@ -641,16 +683,16 @@ class MainWindow(QWidget):
 
         desktop = QApplication.desktop()
         if options['windowLocation'] == '右下角':
-            bottom_right = desktop.screenGeometry().bottomRight()
+            bottom_right = desktop.geometry().bottomRight()
             self.move(bottom_right - QPoint(w, h))
         elif options['windowLocation'] == '左下角':
-            bottom_left = desktop.screenGeometry().bottomLeft()
+            bottom_left = desktop.geometry().bottomLeft()
             self.move(bottom_left - QPoint(0, h))
         elif options['windowLocation'] == '右上角':
-            top_right = desktop.screenGeometry().topRight()
+            top_right = desktop.geometry().topRight()
             self.move(top_right - QPoint(w, 0))
         elif options['windowLocation'] == '左上角':
-            top_left = desktop.screenGeometry().topLeft()
+            top_left = desktop.geometry().topLeft()
             self.move(top_left)
 
         self.setStyleSheet(f"""* {{
@@ -662,14 +704,17 @@ class MainWindow(QWidget):
     background-color: rgba({options['backgroundR']}, {options['backgroundG']}, {options['backgroundB']}, {options['backgroundOpacity']});
 }}""")
 
-        self.lv = QListView()
-        self.lv.setSelectionMode(QAbstractItemView.NoSelection)
-        self.slm = QStringListModel()
-        self.slm.setStringList(['(请稍等)'])
-        self.lv.setModel(self.slm)
+        self.lv = QWebEngineView()
+        self.slm = QWebEnginePage()
+        self.slm.settings().setDefaultTextEncoding('utf-8')
+        self.slm.settings().setFontSize(QWebEngineSettings.DefaultFontSize, options['fontSize'])
+        self.slm.settings().setAttribute(QWebEngineSettings.ShowScrollBars, False)
+        self.slm.setBackgroundColor(Qt.transparent)
+        self.slm.setHtml(messages_to_html([('提示', '请稍等')]))
+        self.lv.setPage(self.slm)
 
-        self.lv.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.lv.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # self.slm.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # self.slm.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
@@ -677,15 +722,13 @@ class MainWindow(QWidget):
         self.setLayout(layout)
 
         self.queue = queue.Queue(maxsize=1)
+        threading.Thread(target=self.message_worker, daemon=True).start()
 
         self.update_messages()
-
         timer = QTimer(self)
         timer.timeout.connect(self.update_messages)
-        timer.start(1000)
+        timer.start(500)
         timer.setSingleShot(False)
-        
-        threading.Thread(target=self.message_worker, daemon=True).start()
 
     def toggle_window(self):
         if self.isVisible():
@@ -704,26 +747,26 @@ class MainWindow(QWidget):
             try:
                 if roomid is None:
                     roomid = get_roomid()
-                msgs = get_messages(roomid)
+                messages = get_messages(roomid)
             except:
                 traceback.print_exc()
                 continue
-            if len(msgs) == 0:
-                msgs = ['(还没有弹幕，快来发一条吧)']
+            if len(messages) == 0:
+                messages.append(('提示', '还没有弹幕，快来发一条吧'))
             if options['showMusicName']:
                 music = current_music().strip()
                 if music:
-                    music = '当前播放：' + music
-                    msgs.append(music)
+                    messages.append(('当前播放', music))
             if options['danmuFile']:
                 with open(options['danmuFile'], 'w') as f:
-                    fmt = options['danmuFormat']
-                    danmu = '\n'.join(msgs)
-                    if fmt:
-                        danmu = fmt.format(danmu=danmu)
-                    f.write(danmu)
+                    danmuFormat = options['danmuFormat']
+                    danmuText = '\n'.join(u + ' :' + m for u, m in messages)
+                    if danmuFormat:
+                        danmuText = danmuFormat.format(danmu=danmuText)
+                    f.write(danmuText)
+            content = messages_to_html(messages)
             try:
-                self.queue.put(msgs, block=False)
+                self.queue.put(content, block=False)
             except queue.Full:
                 pass
             time.sleep(options['refreshInterval'])
@@ -732,12 +775,11 @@ class MainWindow(QWidget):
         if self.isHidden():
             return
         try:
-            msgs = self.queue.get(block=False)
+            content = self.queue.get(block=False)
         except queue.Empty:
             return
-        if self.slm.stringList() != msgs:
-            self.slm.setStringList(msgs)
-            self.lv.scrollToBottom()
+        self.slm.setHtml(content)
+        # self.lv.scrollToBottom()
 
 
 def main():
