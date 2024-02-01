@@ -8,10 +8,12 @@ import urllib.parse
 import datetime
 import random
 import queue
+import shlex
 import json
 import time
 import uuid
 import sys
+import io
 import os
 
 # with open(os.path.expanduser('~/.bilibili-cookies.json'), 'r') as f:
@@ -107,26 +109,38 @@ def get_video_info(bvid):
     data = rep['data']
     return data
 
-def get_video_stream(bvid, quality=1, page=1):
+def get_video_stream(bvid, qn=116, page=1, dash=False):
     pages = get_video_info(bvid)
     assert 1 <= page <= len(pages), (page, len(pages))
     info = pages[page - 1]
     print(info['part'], '{:02d}:{:02d}'.format(info['duration'] // 60, info['duration'] % 60))
     cid = info['cid']
-    url = f'https://api.bilibili.com/x/player/wbi/playUrl?bvid={bvid}&cid={cid}&platform=html5&high_quality={quality}'
+    url = f'https://api.bilibili.com/x/player/playurl?bvid={bvid}&cid={cid}&qn={qn}&fnval={80 if dash else 1}&fnver=0&fourk=1'
     req = requests.get(url, headers=headers, cookies=cookies)
     print(url)
     rep = json.loads(req.text)
     if rep['code'] != 0:
         raise RuntimeError(rep['message'])
     data = rep['data']
-    return data['durl'][0]['url']
+    if dash:
+        return data['dash']['video'][0]['baseUrl']
+    else:
+        return data['durl'][0]['url']
 
 if __name__ == '__main__':
-    roomId = sys.argv[1]
-
-    url = get_live_stream(roomId)
     # url = get_video_stream('BV1vk4y137uJ')
+    # print(url)
+    # cmd1 = 'curl ' + shlex.quote(url) + ' --referer "https://www.bilibili.com" --user-agent ' + shlex.quote(headers['User-Agent']) + ' --output -'
+    # cmd2 = 'vlc -vvv -'
+    # p1 = subprocess.Popen(cmd1, shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+    # p2 = subprocess.Popen(cmd2, shell=True, stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stdin=subprocess.PIPE)
+    # assert p1.stdout
+    # assert p2.stdin
+    # while p2.poll() is None:
+    #     chunk = p1.stdout.read(4096)
+    #     p2.stdin.write(chunk)
 
+    roomId = sys.argv[1]
+    url = get_live_stream(roomId)
     print(url)
     subprocess.check_call(['vlc', url], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
