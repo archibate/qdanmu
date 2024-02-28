@@ -61,11 +61,11 @@ if len(options) == 0 or options.get('version', 'undefined') != current_version:
         'messageR': 162,
         'messageG': 167,
         'messageB': 164,
-        'foregroundOpacity': 1,
+        'foregroundOpacity': 0.1,
         'backgroundR': 83,
         'backgroundG': 186,
         'backgroundB': 255,
-        'backgroundOpacity': 0.05,
+        'backgroundOpacity': 0.0,
         'windowLocation': '左下角',
         'showMusicName': False,
         'showUserMedal': False,
@@ -932,6 +932,5 @@ def main():
 
 
 if __name__ == '__main__':
-    print(current_music())
     # send_message(get_roomid(), '测试')
-    # sys.exit(main())
+    sys.exit(main())

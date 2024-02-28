@@ -8,9 +8,6 @@ import json
 import sys
 import re
 
-# with open(os.path.expanduser('~/.bilibili-cookies.json'), 'r') as f:
-#     cookies = {item['name']: item['value'] for item in json.load(f)}
-
 with open(os.path.expanduser('.bilibili-cookies.json'), 'r') as f:
     cookies = json.load(f)
 
