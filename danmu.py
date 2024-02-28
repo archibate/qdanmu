@@ -82,29 +82,57 @@ if len(options) == 0 or options.get('version', 'undefined') != current_version:
     }
 
 def current_music():
-    if sys.platform != 'linux':
-        return ''  # 暂不支持其他系统的当前音乐查询，如果你知道如何获取窗口标题的列表，欢迎PR
+    titleRegex = options['musicRegex']
     try:
-        suffix = options['musicRegex']
-        with subprocess.Popen(['wmctrl', '-l'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
-            stdout, _ = p.communicate()
-            stdout = stdout.decode()
-            title = ''
-            for line in stdout.splitlines():
-                # 0x02000003  3 archer 终端
-                m = re.match(r'^0x([0-9a-f]+)\s+(\d+)\s+(.*?)\s+(.*)$', line)
-                if m:
-                    title = m.group(4).strip()
-                if re.search(suffix, title):
-                    break
-            else:
+        try:
+            import pywinctl
+        except ImportError:
+            if sys.platform != 'linux':
+                return ''
+            with subprocess.Popen(['wmctrl', '-l'], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as p:
+                stdout, _ = p.communicate()
+                stdout = stdout.decode()
                 title = ''
-        if title:
-            title = re.sub(suffix, '', title)
-        title = title.strip()
-        if title.endswith('.mp4'):
-            title = title[:-len('.mp4')]
-        return title
+                for line in stdout.splitlines():
+                    # 0x02000003  3 archer 终端
+                    m = re.match(r'^0x([0-9a-f]+)\s+(\d+)\s+(.*?)\s+(.*)$', line)
+                    if m:
+                        title = m.group(4).strip()
+                    if re.search(titleRegex, title):
+                        break
+                else:
+                    title = ''
+            if title:
+                title = re.sub(titleRegex, '', title)
+            title = title.strip()
+            if title.endswith('.mp4'):
+                title = title[:-len('.mp4')]
+            return title
+        else:
+            from ewmhlib import EwmhWindow
+            if EwmhWindow.getName.__name__ != 'ewmhFixedGetName':
+                def ewmhFixedGetName(self):
+                    from ewmhlib.Props._props import Window
+                    from ewmhlib import getPropertyValue
+                    ret = self.getProperty(Window.NAME)
+                    res = getPropertyValue(ret, display=self.display)
+                    if res:
+                        return ''.join(map(str, res))
+                    ret = self.getProperty(Window.LEGACY_NAME)
+                    res = getPropertyValue(ret, display=self.display)
+                    if res:
+                        return ''.join(map(str, res))
+                    return None
+                EwmhWindow.getName = ewmhFixedGetName
+            for win in pywinctl.getAllWindows():
+                if re.search(titleRegex, win.title):
+                    title = win.title
+                    if title:
+                        title = re.sub(titleRegex, '', title)
+                        title = title.strip()
+                        if title.endswith('.mp4'):
+                            title = title[:-len('.mp4')]
+                        return title
     except:
         traceback.print_exc()
         return ''
@@ -372,7 +400,7 @@ def start_live(roomid, area):
     data = json.loads(req.text)
     if data['code'] != 0:
         raise RuntimeError(data['message'])
-    return data['rtmp']
+    return data.get('rtmp')
 
 def stop_live(roomid):
     assert roomid != 0 and len(cookies) != 0
@@ -879,11 +907,11 @@ class MainWindow(QWidget):
                 old_messages = messages
                 countdown = options['refreshCountdown']
             if countdown > 0:
-                print('refresh')
+                # print('refresh')
                 time.sleep(options['refreshInterval'])
                 countdown = countdown - 1
             else:
-                print('poll')
+                # print('poll')
                 time.sleep(options['pollInterval'])
 
     def update_messages(self):
@@ -904,5 +932,6 @@ def main():
 
 
 if __name__ == '__main__':
+    print(current_music())
     # send_message(get_roomid(), '测试')
-    sys.exit(main())
+    # sys.exit(main())
