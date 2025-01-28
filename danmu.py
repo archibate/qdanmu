@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
-from PySide2.QtGui import QIcon, QPixmap, QImage, QColor
-from PySide2.QtCore import QPoint, QThread, QTimer, Qt, QEvent
-from PySide2.QtWidgets import QWidget, QLabel, QSystemTrayIcon, QPushButton, QMenu, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTextEdit, QApplication, QColorDialog
-from PySide2.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
+from PySide6.QtGui import QIcon, QPixmap, QImage, QColor
+from PySide6.QtCore import QPoint, QThread, QTimer, Qt, QEvent
+from PySide6.QtWidgets import QWidget, QLabel, QSystemTrayIcon, QPushButton, QMenu, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTextEdit, QApplication, QColorDialog
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+from PySide6.QtWebEngineWidgets import QWebEngineView
 
 import urllib.parse
 import subprocess
@@ -266,7 +267,7 @@ class LoginWindow(QWidget):
         if data['code'] == 0:
             with open('.bilibili-cookies.json', 'w') as f:
                 json.dump(cookies, f)
-            del options['roomId']
+            options.pop('roomId')
             with open('.bilibili-options.json', 'w') as f:
                 json.dump(options, f)
             self.status = '登录成功'
@@ -786,7 +787,7 @@ class MainWindow(QWidget):
         w, h = options['width'], options['height']
         self.resize(w, h)
 
-        desktop = QApplication.desktop()
+        desktop = QApplication.primaryScreen()
         if options['windowLocation'] == '右下角':
             bottom_right = desktop.geometry().bottomRight()
             self.move(bottom_right - QPoint(w, h))
@@ -928,7 +929,7 @@ def main():
     app = QApplication(sys.argv)
     win = MainWindow()
     win.show()
-    return app.exec_()
+    return app.exec()
 
 
 if __name__ == '__main__':
